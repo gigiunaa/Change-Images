@@ -1,19 +1,19 @@
 import express from "express";
 import fs from "fs";
 import path from "path";
-import cheerio from "cheerio";
+import * as cheerio from "cheerio";   // ⬅️ გასწორებულია
 import archiver from "archiver";
 import multer from "multer";
 
 const app = express();
 const upload = multer({ dest: "uploads/" });
 
-// Healthcheck endpoint (Render-ში სასარგებლოა)
+// Healthcheck
 app.get("/", (req, res) => {
   res.send("Server is running ✅");
 });
 
-// მთავარი ფუნქცია — ZIP გენერაცია
+// მთავარი ZIP გენერაციის endpoint
 app.post("/process", upload.array("files"), async (req, res) => {
   try {
     const htmlFile = req.files.find(f => f.originalname.endsWith(".html"));
@@ -28,7 +28,7 @@ app.post("/process", upload.array("files"), async (req, res) => {
 
     let counter = 1;
     for (const img of $("img").toArray()) {
-      const src = $(img).attr("src");
+      const src = $(img).attribs.src;
       if (!src || /^(http|https|data:)/.test(src)) continue;
 
       const file = req.files.find(f => f.originalname === src);
@@ -39,7 +39,7 @@ app.post("/process", upload.array("files"), async (req, res) => {
       const newPath = path.join(imagesDir, newName);
 
       fs.copyFileSync(file.path, newPath);
-      $(img).attr("src", `images/${newName}`);
+      $(img).attribs.src = `images/${newName}`;
       counter++;
     }
 
@@ -58,6 +58,5 @@ app.post("/process", upload.array("files"), async (req, res) => {
   }
 });
 
-// Render-ის PORT
 const port = process.env.PORT || 10000;
 app.listen(port, () => console.log(`🚀 Server running on port ${port}`));
