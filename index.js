@@ -18,7 +18,10 @@ app.post("/process", upload.array("files"), async (req, res) => {
   try {
     // მოძებნე content.html
     const htmlFile = req.files.find(f => f.originalname.endsWith(".html"));
-    if (!htmlFile) return res.status(400).send("content.html not found");
+    if (!htmlFile) {
+      console.error("❌ content.html not found in uploaded files");
+      return res.status(400).send("content.html not found");
+    }
 
     const html = fs.readFileSync(htmlFile.path, "utf8");
     const $ = cheerio.load(html);
@@ -28,27 +31,30 @@ app.post("/process", upload.array("files"), async (req, res) => {
     fs.rmSync("output", { recursive: true, force: true });
     fs.mkdirSync(imagesDir, { recursive: true });
 
-    // ამოვიღოთ ყველა სურათის ტეგი
+    // ყველა <img>
     const imgTags = $("img").toArray();
 
     // ყველა ატვირთული ფაილი (გარდა html-ის)
     const uploadedImages = req.files.filter(f => !f.originalname.endsWith(".html"));
 
-    let counter = 1;
-    for (const file of uploadedImages) {
+    // Debug logs
+    console.log("Uploaded files:", req.files.map(f => f.originalname));
+    console.log("Uploaded images (excluding html):", uploadedImages.map(f => f.originalname));
+    console.log("Found <img> tags in HTML:", imgTags.length);
+
+    // მხოლოდ იმდენი ვამუშავოთ, რამდენიც ორივეგან არის
+    const count = Math.min(imgTags.length, uploadedImages.length);
+
+    for (let i = 0; i < count; i++) {
+      const file = uploadedImages[i];
       const ext = path.extname(file.originalname) || ".png";
-      const newName = `image${counter}${ext}`;
+      const newName = `image${i + 1}${ext}`;
       const newPath = path.join(imagesDir, newName);
 
-      // დავაკოპიროთ გადანომრილი სახელი
       fs.copyFileSync(file.path, newPath);
+      imgTags[i].attribs.src = `images/${newName}`;
 
-      // HTML-ში ჩავანაცვლოთ n-ე <img> შესაბამისი imageN-ით
-      if (imgTags[counter - 1]) {
-        imgTags[counter - 1].attribs.src = `images/${newName}`;
-      }
-
-      counter++;
+      console.log(`✔️ ${file.originalname} → ${newName}`);
     }
 
     // შევინახოთ ახალი HTML
@@ -63,7 +69,7 @@ app.post("/process", upload.array("files"), async (req, res) => {
     archive.directory(imagesDir, "images");
     await archive.finalize();
   } catch (err) {
-    console.error(err);
+    console.error("❌ Error while processing:", err);
     res.status(500).send("Processing failed");
   }
 });
