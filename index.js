@@ -8,17 +8,20 @@ import multer from "multer";
 const app = express();
 const upload = multer({ dest: "uploads/" });
 
-// Upload HTML + სურათების ფაილები
+// Healthcheck endpoint (Render-ში სასარგებლოა)
+app.get("/", (req, res) => {
+  res.send("Server is running ✅");
+});
+
+// მთავარი ფუნქცია — ZIP გენერაცია
 app.post("/process", upload.array("files"), async (req, res) => {
   try {
-    // მოძებნე content.html
     const htmlFile = req.files.find(f => f.originalname.endsWith(".html"));
     if (!htmlFile) return res.status(400).send("content.html not found");
 
     const html = fs.readFileSync(htmlFile.path, "utf8");
     const $ = cheerio.load(html);
 
-    // images/ საქაღალდე
     const imagesDir = path.join("output", "images");
     fs.rmSync("output", { recursive: true, force: true });
     fs.mkdirSync(imagesDir, { recursive: true });
@@ -28,7 +31,6 @@ app.post("/process", upload.array("files"), async (req, res) => {
       const src = $(img).attr("src");
       if (!src || /^(http|https|data:)/.test(src)) continue;
 
-      // მოძებნე შესაბამისი ატვირთული სურათი
       const file = req.files.find(f => f.originalname === src);
       if (!file) continue;
 
@@ -41,11 +43,9 @@ app.post("/process", upload.array("files"), async (req, res) => {
       counter++;
     }
 
-    // ჩაწერე index.html
     const outHtml = path.join("output", "index.html");
     fs.writeFileSync(outHtml, $.html(), "utf8");
 
-    // შეკარი ZIP
     res.attachment("archive.zip");
     const archive = archiver("zip", { zlib: { level: 9 } });
     archive.pipe(res);
@@ -58,5 +58,6 @@ app.post("/process", upload.array("files"), async (req, res) => {
   }
 });
 
+// Render-ის PORT
 const port = process.env.PORT || 10000;
 app.listen(port, () => console.log(`🚀 Server running on port ${port}`));
