@@ -37,7 +37,6 @@ app.post("/process", upload.array("files"), async (req, res) => {
     // ყველა ატვირთული ფაილი (გარდა html-ის)
     const uploadedImages = req.files.filter(f => !f.originalname.endsWith(".html"));
 
-    // Debug logs
     console.log("Uploaded files:", req.files.map(f => f.originalname));
     console.log("Uploaded images (excluding html):", uploadedImages.map(f => f.originalname));
     console.log("Found <img> tags in HTML:", imgTags.length);
@@ -52,7 +51,7 @@ app.post("/process", upload.array("files"), async (req, res) => {
       const newPath = path.join(imagesDir, newName);
 
       fs.copyFileSync(file.path, newPath);
-      imgTags[i].attribs.src = `images/${newName}`;
+      $(imgTags[i]).attr("src", `images/${newName}`);
 
       console.log(`✔️ ${file.originalname} → ${newName}`);
     }
@@ -61,8 +60,11 @@ app.post("/process", upload.array("files"), async (req, res) => {
     const outHtml = path.join("output", "index.html");
     fs.writeFileSync(outHtml, $.html(), "utf8");
 
+    // დავაყენოთ ZIP headers
+    res.setHeader("Content-Type", "application/zip");
+    res.setHeader("Content-Disposition", "attachment; filename=archive.zip");
+
     // შევკრათ ZIP
-    res.attachment("archive.zip");
     const archive = archiver("zip", { zlib: { level: 9 } });
     archive.pipe(res);
     archive.file(outHtml, { name: "index.html" });
