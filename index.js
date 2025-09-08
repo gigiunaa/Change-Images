@@ -16,7 +16,6 @@ app.get("/", (req, res) => {
 
 app.post("/process", upload.array("files"), async (req, res) => {
   try {
-    // მოძებნე ZIP და HTML
     const zipFile = req.files.find(f => f.originalname.endsWith(".zip"));
     const htmlFile = req.files.find(f => f.originalname.endsWith(".html"));
 
@@ -24,7 +23,6 @@ app.post("/process", upload.array("files"), async (req, res) => {
       return res.status(400).send("❌ content.html not found");
     }
 
-    // HTML-ის ჩატვირთვა
     const html = fs.readFileSync(htmlFile.path, "utf8");
     const $ = cheerio.load(html);
 
@@ -35,14 +33,43 @@ app.post("/process", upload.array("files"), async (req, res) => {
 
     let imgCounter = 1;
 
-    // ZIP-ის გახსნა (თუ ZIP ფაილი არსებობს)
     if (zipFile) {
       const zipStream = fs.createReadStream(zipFile.path).pipe(unzipper.Parse({ forceStream: true }));
       for await (const entry of zipStream) {
         const fileName = entry.path;
-        const ext = path.extname(fileName);
+        const ext = path.extname(fileName).toLowerCase();
 
-        if (ext.match(/\.(png|jpg|jpeg|gif)$/i)) {
+        if (ext === ".zip" && fileName.includes("images")) {
+          // თუ nested images.zipაა, გახსენი შიგნით
+          const nestedBuffer = await entry.buffer();
+          const nestedStream = unzipper.Parse({ forceStream: true });
+          nestedStream.end(nestedBuffer);
+
+          for await (const nestedEntry of nestedStream) {
+            const nestedName = nestedEntry.path;
+            const nestedExt = path.extname(nestedName).toLowerCase();
+
+            if (nestedExt.match(/\.(png|jpg|jpeg|gif)$/i)) {
+              const newName = `image${imgCounter}${nestedExt}`;
+              const newPath = path.join(imagesDir, newName);
+
+              await new Promise((resolve, reject) => {
+                nestedEntry.pipe(fs.createWriteStream(newPath))
+                  .on("finish", resolve)
+                  .on("error", reject);
+              });
+
+              const imgTag = $("img").get(imgCounter - 1);
+              if (imgTag) {
+                $(imgTag).attr("src", `images/${newName}`);
+              }
+              imgCounter++;
+            } else {
+              nestedEntry.autodrain();
+            }
+          }
+        } else if (ext.match(/\.(png|jpg|jpeg|gif)$/i)) {
+          // ჩვეულებრივი სურათის დამუშავება
           const newName = `image${imgCounter}${ext}`;
           const newPath = path.join(imagesDir, newName);
 
@@ -52,12 +79,10 @@ app.post("/process", upload.array("files"), async (req, res) => {
               .on("error", reject);
           });
 
-          // HTML-ში ჩანაცვლება
           const imgTag = $("img").get(imgCounter - 1);
           if (imgTag) {
             $(imgTag).attr("src", `images/${newName}`);
           }
-
           imgCounter++;
         } else {
           entry.autodrain();
