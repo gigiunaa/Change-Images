@@ -4,6 +4,7 @@ import path from "path";
 import * as cheerio from "cheerio";
 import archiver from "archiver";
 import multer from "multer";
+import unzipper from "unzipper";
 
 const app = express();
 const upload = multer({ dest: "uploads/" });
@@ -13,65 +14,72 @@ app.get("/", (req, res) => {
   res.send("Server is running ✅");
 });
 
-// მთავარი ZIP გენერაციის endpoint
 app.post("/process", upload.array("files"), async (req, res) => {
   try {
-    // მოძებნე content.html
+    // მოძებნე ZIP და HTML
+    const zipFile = req.files.find(f => f.originalname.endsWith(".zip"));
     const htmlFile = req.files.find(f => f.originalname.endsWith(".html"));
+
     if (!htmlFile) {
-      console.error("❌ content.html not found in uploaded files");
-      return res.status(400).send("content.html not found");
+      return res.status(400).send("❌ content.html not found");
     }
 
+    // HTML-ის ჩატვირთვა
     const html = fs.readFileSync(htmlFile.path, "utf8");
     const $ = cheerio.load(html);
 
-    // ახალი images საქაღალდის მომზადება
+    // output images საქაღალდე
     const imagesDir = path.join("output", "images");
     fs.rmSync("output", { recursive: true, force: true });
     fs.mkdirSync(imagesDir, { recursive: true });
 
-    // ყველა <img>
-    const imgTags = $("img").toArray();
+    let imgCounter = 1;
 
-    // ყველა ატვირთული ფაილი (გარდა html-ის)
-    const uploadedImages = req.files.filter(f => !f.originalname.endsWith(".html"));
+    // ZIP-ის გახსნა (თუ ZIP ფაილი არსებობს)
+    if (zipFile) {
+      const zipStream = fs.createReadStream(zipFile.path).pipe(unzipper.Parse({ forceStream: true }));
+      for await (const entry of zipStream) {
+        const fileName = entry.path;
+        const ext = path.extname(fileName);
 
-    console.log("Uploaded files:", req.files.map(f => f.originalname));
-    console.log("Uploaded images (excluding html):", uploadedImages.map(f => f.originalname));
-    console.log("Found <img> tags in HTML:", imgTags.length);
+        if (ext.match(/\.(png|jpg|jpeg|gif)$/i)) {
+          const newName = `image${imgCounter}${ext}`;
+          const newPath = path.join(imagesDir, newName);
 
-    // მხოლოდ იმდენი ვამუშავოთ, რამდენიც ორივეგან არის
-    const count = Math.min(imgTags.length, uploadedImages.length);
+          await new Promise((resolve, reject) => {
+            entry.pipe(fs.createWriteStream(newPath))
+              .on("finish", resolve)
+              .on("error", reject);
+          });
 
-    for (let i = 0; i < count; i++) {
-      const file = uploadedImages[i];
-      const ext = path.extname(file.originalname) || ".png";
-      const newName = `image${i + 1}${ext}`;
-      const newPath = path.join(imagesDir, newName);
+          // HTML-ში ჩანაცვლება
+          const imgTag = $("img").get(imgCounter - 1);
+          if (imgTag) {
+            $(imgTag).attr("src", `images/${newName}`);
+          }
 
-      fs.copyFileSync(file.path, newPath);
-      $(imgTags[i]).attr("src", `images/${newName}`);
-
-      console.log(`✔️ ${file.originalname} → ${newName}`);
+          imgCounter++;
+        } else {
+          entry.autodrain();
+        }
+      }
     }
 
-    // შევინახოთ ახალი HTML
+    // HTML შენახვა
     const outHtml = path.join("output", "index.html");
     fs.writeFileSync(outHtml, $.html(), "utf8");
 
-    // დავაყენოთ ZIP headers
+    // პასუხის ZIP
     res.setHeader("Content-Type", "application/zip");
     res.setHeader("Content-Disposition", "attachment; filename=archive.zip");
 
-    // შევკრათ ZIP
     const archive = archiver("zip", { zlib: { level: 9 } });
     archive.pipe(res);
     archive.file(outHtml, { name: "index.html" });
     archive.directory(imagesDir, "images");
     await archive.finalize();
   } catch (err) {
-    console.error("❌ Error while processing:", err);
+    console.error("❌ Processing failed:", err);
     res.status(500).send("Processing failed");
   }
 });
